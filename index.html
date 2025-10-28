@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8">
+    <title>Untitled</title>
+    <link rel="stylesheet" href="./style.css">
+
+  </head>
+    
+  <body>
+  <!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Crown Regency Davao – Activity Report System</title>
+
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Cloudinary widget -->
+  <script src="https://widget.cloudinary.com/v2.0/global/all.js"></script>
+</head>
+<body>
+
+  <div class="page-bg"></div>
+
+  <header class="topbar">
+    <div class="left">
+      <img src="https://i.postimg.cc/CMqFKHZg/images-1.png" alt="CRRD Logo" class="logo-img" />
+      <div class="title-block">
+        <div class="small">CRRD</div>
+        <div class="big">Request Materials</div>
+      </div>
+    </div>
+
+    <div class="right">
+      <button id="homeBtn" class="btn ghost">Home</button>
+      <span id="userNameDisplay" class="user-name"></span>
+      <button id="logoutBtn" class="btn danger hidden">Logout</button>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- AUTH SECTION -->
+    <section id="authWrap" class="panel-grid">
+
+      <div class="card auth-card" id="loginCard">
+        <h2>Login</h2>
+        <input id="loginEmail" placeholder="Email" type="email" />
+        <input id="loginPassword" placeholder="Password" type="password" />
+        <div class="row">
+          <button id="loginBtn" class="btn">Login</button>
+          <button id="toRegister" class="btn ghost">Register</button>
+        </div>
+        <p class="muted-link"><a href="#" id="toForgot">Forgot password?</a></p>
+      </div>
+
+      <div class="card auth-card hidden" id="registerCard">
+        <h2>Register</h2>
+        <input id="regName" placeholder="Full Name" type="text" />
+        <input id="regEmail" placeholder="Email" type="email" />
+        <input id="regPassword" placeholder="Password" type="password" />
+        <select id="regRole">
+          <option value="">Select Role</option>
+          <option value="Maintenance">Maintenance</option>
+          <option value="GM">GM</option>
+        </select>
+        <input id="regApproval" placeholder="Approval Code (for GM)" type="text" class="hidden" />
+        <div class="row">
+          <button id="registerBtn" class="btn">Register</button>
+          <button id="toLoginFromReg" class="btn ghost">Back to Login</button>
+        </div>
+      </div>
+
+      <div class="card auth-card hidden" id="forgotCard">
+        <h2>Forgot Password</h2>
+        <input id="forgotEmail" placeholder="Enter registered email" type="email" />
+        <div class="row">
+          <button id="forgotBtn" class="btn">Send Reset Link</button>
+          <button id="backToLogin" class="btn ghost">Back</button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- DASHBOARD -->
+    <section id="dashboard" class="hidden">
+      <div class="grid">
+
+        <div class="col main-col">
+
+          <div class="card">
+            <h3>Submit Request</h3>
+            <form id="reqForm" class="form">
+              <label>Date / Time</label>
+              <input id="reqDate" readonly />
+
+              <label>Particular</label>
+              <input id="reqParticular" required />
+
+              <label>Unit</label>
+              <input id="reqUnit" required />
+
+              <label>Quantity</label>
+              <input id="reqQty" type="number" min="1" required />
+
+              <label>Attachment</label>
+              <div class="row">
+                <button type="button" id="upload_widget" class="btn">Upload file</button>
+                <input id="uploadedURL" type="hidden" />
+                <span id="uploadName" class="muted small">No file</span>
+              </div>
+
+              <div class="row mt">
+                <button type="submit" class="btn success">Submit Request</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <h3>Quick Actions</h3>
+            <div class="actions-grid">
+              <button id="btnViewRequest" class="btn">View Requests</button>
+              <button id="btnViewRemaining" class="btn">View Remaining Items</button>
+              <button id="btnViewStatus" class="btn">View Status Delivery</button>
+              <button id="btnViewApprovals" class="btn hidden gm-only">View Approvals</button>
+              <button id="btnViewUsage" class="btn">View Usage</button>
+            </div>
+            <p class="muted small mt">Note: Everyone can view who submitted requests (view-only). GM can approve/disapprove.</p>
+          </div>
+
+        </div>
+
+        <aside class="col side-col">
+          <div class="card">
+            <h4>Summary</h4>
+            <div id="summaryBox">
+              <p><strong>Total Requests:</strong> <span id="totalReq">0</span></p>
+              <p><strong>Pending:</strong> <span id="totalPending">0</span></p>
+              <p><strong>Approved:</strong> <span id="totalApproved">0</span></p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h4>Recent Requests</h4>
+            <div id="recentList">No requests yet.</div>
+          </div>
+
+        </aside>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL -->
+  <div id="modal" class="modal hidden" role="dialog" aria-hidden="true">
+    <div class="modal-card">
+      <button id="modalClose" class="close">✕</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toastContainer" aria-live="polite"></div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
+    <script type="module" src="./script.js"></script>
+
+  </body>
+  
+</html>
