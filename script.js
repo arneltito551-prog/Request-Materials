@@ -1,4 +1,4 @@
-// script.js (module) - Firestore-backed dashboard (cleaned, deduplicated, fixed)
+// script.js (module) - Firestore-backed dashboard (cleaned, deduplicated, merged-delivery)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-analytics.js";
 import {
@@ -20,18 +20,22 @@ const app = initializeApp(firebaseConfig);
 try { getAnalytics(app); } catch (e) { /* ignore analytics errors */ }
 const db = getFirestore(app);
 
-// cloudinary placeholders (not used but left for future)
-const cloudName = "dtmm8frik";
-const uploadPreset = "Crrd2025";
-
 // ---------- COLLECTIONS ----------
 const requestsCol = collection(db, "requests");
 const deliveredCol = collection(db, "delivered");
 const usageCol = collection(db, "usage");
 
-// ---------- UI REFS (safely get by id) ----------
-function $id(id){ return document.getElementById(id); }
+// ---------- DOM helpers ----------
+const $id = id => document.getElementById(id);
+function safeAddListener(el, ev, fn){ if(!el) return; el.addEventListener(ev, fn); }
+function openModal(el){ if(!el) return; el.classList.add("fullscreen"); el.style.display="flex"; el.setAttribute("aria-hidden","false"); document.body.style.overflow="hidden"; }
+function closeModal(el){ if(!el) return; el.style.display="none"; el.classList.remove("fullscreen"); el.setAttribute("aria-hidden","true"); document.body.style.overflow=""; }
+function showToast(msg){ const t = $id("toast"); if(!t) return; t.textContent = msg; t.className = "show"; setTimeout(()=> t.className = "", 3000); }
+function escapeHtml(s){ if(!s && s !== 0) return ""; return s.toString().replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
+function fmtDate(ts){ try{ return ts?.toDate ? ts.toDate().toLocaleString() : new Date(ts).toLocaleString(); } catch(e){ return ""; } }
+function normKey(s){ return (s||"").toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""); }
 
+// ---------- UI REFS ----------
 const submitRequestBtn = $id("submitRequestBtn");
 const submitModal = $id("submitModal");
 const exitModalBtn = $id("exitModalBtn");
@@ -41,7 +45,6 @@ const personnelEl = $id("personnel");
 const particularEl = $id("particular");
 const unitEl = $id("unit");
 const qtyEl = $id("qty");
-const toastEl = $id("toast");
 
 const viewRequestBtn = $id("viewRequestBtn");
 const viewRequestModal = $id("viewRequestModal");
@@ -114,61 +117,21 @@ const printHistoryBtn = $id("printHistoryBtn");
 let editingDeliveredId = null;
 let editingUsageId = null;
 
-// local cached requests for selects / quick lookup
+// cached requests for selects
 let latestRequestsArray = [];
 
-// ---------- small safe helpers ----------
-function safeAddListener(el, ev, fn){
-  if(!el) return;
-  el.addEventListener(ev, fn);
-}
-function openModal(el){
-  if(!el) return;
-  el.classList.add("fullscreen");
-  el.style.display = "flex";
-  el.setAttribute("aria-hidden","false");
-  document.body.style.overflow = "hidden";
-}
-function closeModal(el){
-  if(!el) return;
-  el.style.display = "none";
-  el.classList.remove("fullscreen");
-  el.setAttribute("aria-hidden","true");
-  document.body.style.overflow = "";
-}
-function showToast(msg){
-  if(!toastEl) return;
-  toastEl.textContent = msg;
-  toastEl.className = "show";
-  setTimeout(()=> toastEl.className = "", 3000);
-}
-function fmtDate(ts){
-  try{ return ts?.toDate ? ts.toDate().toLocaleString() : new Date(ts).toLocaleString(); } catch(e){ return ""; }
-}
-function escapeHtml(s){ if(!s) return ""; return s.toString().replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
-function normKey(s){ return (s||"").toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""); }
-
-// compute remaining helpers
-function remainingForDelivered(req) {
-  if(req?.remainingForDelivered != null) return Number(req.remainingForDelivered);
-  return Number(req.qty ?? 0);
-}
-function remainingForUsage(req) {
-  if(req?.remainingForUsage != null) return Number(req.remainingForUsage);
-  return Number(req.qty ?? 0);
-}
+// ---------- helpers ----------
+function remainingForDelivered(req) { if(req?.remainingForDelivered != null) return Number(req.remainingForDelivered); return Number(req.qty ?? 0); }
+function remainingForUsage(req) { if(req?.remainingForUsage != null) return Number(req.remainingForUsage); return Number(req.qty ?? 0); }
 
 // ---------- Submit Request ----------
-safeAddListener(submitRequestBtn, "click", ()=>{
-  if(dateEl) dateEl.value = new Date().toLocaleString();
-  openModal(submitModal);
-});
+safeAddListener(submitRequestBtn, "click", ()=>{ if(dateEl) dateEl.value = new Date().toLocaleString(); openModal(submitModal); });
 safeAddListener(exitModalBtn, "click", ()=> closeModal(submitModal));
 
 safeAddListener(submitDataBtn, "click", async ()=>{
-  const personnel = personnelEl?.value.trim();
-  const particular = particularEl?.value.trim();
-  const unit = unitEl?.value.trim();
+  const personnel = personnelEl?.value?.trim();
+  const particular = particularEl?.value?.trim();
+  const unit = unitEl?.value?.trim();
   const qty = Number(qtyEl?.value);
   if(!personnel || !particular || !unit || !qty || qty <= 0){ showToast("⚠️ Fill all fields"); return; }
   try{
@@ -191,7 +154,6 @@ safeAddListener(submitDataBtn, "click", async ()=>{
 
 // ---------- Requests live listener ----------
 const requestsQ = query(requestsCol, orderBy("createdAt","desc"));
-
 onSnapshot(requestsQ, snapshot=>{
   if(requestsTbody) requestsTbody.innerHTML = "";
   const deliveredSelectList = [];
@@ -205,7 +167,6 @@ onSnapshot(requestsQ, snapshot=>{
     const date = fmtDate(d.createdAt);
     const remLabel = `D:${remD} | U:${remU}`;
 
-    // local cache
     latestRequestsArray.push({ id, ...d, remainingForDelivered: remD, remainingForUsage: remU, createdAt: d.createdAt });
 
     if(requestsTbody){
@@ -217,36 +178,26 @@ onSnapshot(requestsQ, snapshot=>{
         <td>${d.qty ?? 0}</td>
         <td>${remLabel}</td>
         <td>${date}</td>
-        <td>
-          <button class="table-btn small-delete" data-id="${id}" data-action="delete">Delete</button>
-        </td>
+        <td><button class="table-btn small-delete" data-id="${id}" data-action="delete">Delete</button></td>
       `;
       requestsTbody.appendChild(tr);
     }
 
-    if(!d.deliveredFulfilled && remD > 0) {
-      deliveredSelectList.push({ id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
-    }
-    if(!d.usageFulfilled && remU > 0) {
-      usageSelectList.push({ id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
-    }
+    if(!d.deliveredFulfilled && remD > 0) deliveredSelectList.push({ id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
+    if(!d.usageFulfilled && remU > 0) usageSelectList.push({ id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
   });
 
-  // bind delete buttons (scoped)
+  // delete binding
   if(requestsTbody){
     requestsTbody.querySelectorAll("button[data-action='delete']").forEach(btn=>{
       btn.onclick = async () => {
         const id = btn.dataset.id;
         if(!confirm("Delete this request and all related Delivered & Usage records?")) return;
-        try{
-          await cascadeDeleteRequest(id);
-          showToast("✅ Request and related records deleted");
-        } catch(err){ console.error(err); showToast("⚠️ Delete failed"); }
+        try{ await cascadeDeleteRequest(id); showToast("✅ Request and related records deleted"); } catch(e){ console.error(e); showToast("⚠️ Delete failed"); }
       };
     });
   }
 
-  // fill selects
   fillDeliveredSelect(deliveredSelectList);
   fillUsageSelect(usageSelectList);
 });
@@ -255,12 +206,9 @@ onSnapshot(requestsQ, snapshot=>{
 safeAddListener(viewRequestBtn, "click", ()=> openModal(viewRequestModal));
 safeAddListener(closeRequestsBtn, "click", ()=> closeModal(viewRequestModal));
 safeAddListener(closeRequestsBtnTop, "click", ()=> closeModal(viewRequestModal));
-
-// search requests (filter table rows) - single hookup
 safeAddListener(searchRequests, "input", ()=> filterTableRows(requestsTbody, searchRequests.value));
-safeAddListener(printRequestsBtn, "click", ()=> printTable("Requests", document.getElementById("requestsTable")));
+safeAddListener(printRequestsBtn, "click", ()=> printTable("Requests", $id("requestsTable")));
 
-// open add delivered/usage from requests
 safeAddListener(openAddDeliveredFromRequestsBtn, "click", ()=>{
   editingDeliveredId = null;
   if(editDeliveredTitle) editDeliveredTitle.textContent = "Add Delivered (select request)";
@@ -287,22 +235,21 @@ async function cascadeDeleteRequest(requestId){
   const reqRef = doc(db, "requests", requestId);
   batch.delete(reqRef);
 
-  const delQ = query(deliveredCol, where("fromRequestId", "==", requestId));
+  const delQ = query(deliveredCol, where("fromRequestId","==", requestId));
   const delSnap = await getDocs(delQ);
-  delSnap.forEach(s => batch.delete(doc(db, "delivered", s.id)));
+  delSnap.forEach(s => batch.delete(doc(db,"delivered", s.id)));
 
-  const usageQ = query(usageCol, where("fromRequestId", "==", requestId));
+  const usageQ = query(usageCol, where("fromRequestId","==", requestId));
   const usageSnap = await getDocs(usageQ);
-  usageSnap.forEach(s => batch.delete(doc(db, "usage", s.id)));
+  usageSnap.forEach(s => batch.delete(doc(db,"usage", s.id)));
 
   await batch.commit();
 }
 
-// ---------- Delivered add/edit/toggle ----------
+// ---------- Delivered (no-duplicate merge on add) ----------
 safeAddListener(viewDeliveredBtn, "click", ()=> openModal(deliveredModal));
 safeAddListener(closeDeliveredBtn, "click", ()=> closeModal(deliveredModal));
 safeAddListener(closeDeliveredBtnTop, "click", ()=> closeModal(deliveredModal));
-
 safeAddListener(addDeliveredBtn, "click", ()=>{
   editingDeliveredId = null;
   if(editDeliveredTitle) editDeliveredTitle.textContent = "Add Delivered";
@@ -314,27 +261,61 @@ safeAddListener(addDeliveredBtn, "click", ()=>{
 });
 safeAddListener(cancelEditDeliveredBtn, "click", ()=> closeModal(editDeliveredModal));
 
+// Helper: build normalized key for delivered merging
+function deliveredKey(particular, unit, fromRequestId){
+  // include fromRequestId so deliveries linked to different requests don't merge unless same
+  const keyParts = [particular || "", unit || "", fromRequestId || ""];
+  return normKey(keyParts.join("|"));
+}
+
 safeAddListener(saveDeliveredBtn, "click", async ()=>{
-  const particular = editDeliveredParticular?.value.trim();
-  const unit = editDeliveredUnit?.value.trim();
+  const particular = editDeliveredParticular?.value?.trim();
+  const unit = editDeliveredUnit?.value?.trim();
   const qty = Number(editDeliveredQty?.value);
   const linkedRequestId = deliveredRequestSelect?.value || null;
   if(!particular || !unit || !qty || qty <= 0){ showToast("⚠️ Fill delivered fields"); return; }
+
   try{
     if(editingDeliveredId){
-      await updateDoc(doc(db, "delivered", editingDeliveredId), { particular, unit, qty, updatedAt: serverTimestamp() });
+      // editing existing delivered record: possibly update key if particular/unit changed
+      const ref = doc(db, "delivered", editingDeliveredId);
+      const snap = await getDoc(ref);
+      if(!snap.exists()){ showToast("Record missing"); return; }
+      const old = snap.data();
+      const newKey = deliveredKey(particular, unit, linkedRequestId);
+      await updateDoc(ref, { particular, unit, qty, fromRequestId: linkedRequestId ?? null, key: newKey, updatedAt: serverTimestamp() });
       showToast("✅ Delivered updated");
+      // no additional request remaining change on edit (you may want to adjust if qty changed vs old.qty)
+      // If you want to adjust request remaining when editing, uncomment below and handle delta:
+      // const delta = Number(qty) - Number(old.qty || 0);
+      // if(linkedRequestId && delta > 0) await decrementDeliveredRemaining(linkedRequestId, delta);
     } else {
-      await addDoc(deliveredCol, {
-        particular, unit, qty, status: "pending", deliveredAt: serverTimestamp(), fromRequestId: linkedRequestId ?? null
-      });
-      showToast("✅ Delivered added");
-      if(linkedRequestId){
-        await decrementDeliveredRemaining(linkedRequestId, qty);
+      // ADD: try to merge with existing delivered record with same key
+      const key = deliveredKey(particular, unit, linkedRequestId);
+      const q = query(deliveredCol, where("key","==", key));
+      const existingSnap = await getDocs(q);
+      if(!existingSnap.empty){
+        // merge to the first matching doc (should be unique if we maintain key)
+        const docSnap = existingSnap.docs[0];
+        const ref = doc(db, "delivered", docSnap.id);
+        const prevQty = Number(docSnap.data().qty || 0);
+        const newQty = prevQty + Number(qty || 0);
+        await updateDoc(ref, { qty: newQty, updatedAt: serverTimestamp() });
+        showToast("✅ Delivered merged (quantity updated)");
+        // decrement request remaining by the added qty only
+        if(linkedRequestId) await decrementDeliveredRemaining(linkedRequestId, qty);
+      } else {
+        // create new delivered record with 'key' field for future merges
+        await addDoc(deliveredCol, {
+          particular, unit, qty, status: "pending", deliveredAt: serverTimestamp(),
+          fromRequestId: linkedRequestId ?? null, key
+        });
+        showToast("✅ Delivered added");
+        if(linkedRequestId) await decrementDeliveredRemaining(linkedRequestId, qty);
       }
     }
     closeModal(editDeliveredModal);
-  } catch(e){ console.error(e); showToast("⚠️ Save failed"); }
+  } catch(e){ console.error("saveDelivered error", e); showToast("⚠️ Save failed"); }
 });
 
 // delivered live listener
@@ -362,7 +343,6 @@ onSnapshot(deliveredQ, snapshot=>{
     }
   });
 
-  // scope only buttons with data-action
   if(deliveredTbody){
     deliveredTbody.querySelectorAll("button[data-action]").forEach(btn=>{
       btn.onclick = async () => {
@@ -417,11 +397,10 @@ async function decrementDeliveredRemaining(requestId, delta){
   } catch(err){ console.error("decrementDeliveredRemaining error:", err); }
 }
 
-// ---------- Usage add/edit ----------
+// ---------- Usage (unchanged behavior, cleaned) ----------
 safeAddListener(viewUsageBtn, "click", ()=> openModal(usageModal));
 safeAddListener(closeUsageBtn, "click", ()=> closeModal(usageModal));
 safeAddListener(closeUsageBtnTop, "click", ()=> closeModal(usageModal));
-
 safeAddListener(addUsageBtn, "click", ()=>{
   editingUsageId = null;
   if(editUsageTitle) editUsageTitle.textContent = "Add Usage";
@@ -435,10 +414,10 @@ safeAddListener(addUsageBtn, "click", ()=>{
 safeAddListener(cancelEditUsageBtn, "click", ()=> closeModal(editUsageModal));
 
 safeAddListener(saveUsageBtn, "click", async ()=>{
-  const particular = editUsageParticular?.value.trim();
-  const unit = editUsageUnit?.value.trim();
+  const particular = editUsageParticular?.value?.trim();
+  const unit = editUsageUnit?.value?.trim();
   const qty = Number(editUsageQty?.value);
-  const remarks = editUsageRemarks?.value.trim();
+  const remarks = editUsageRemarks?.value?.trim();
   const linkedRequestId = usageRequestSelect?.value || null;
   if(!particular || !unit || !qty || qty <= 0){ showToast("⚠️ Fill usage fields"); return; }
   try{
@@ -448,12 +427,10 @@ safeAddListener(saveUsageBtn, "click", async ()=>{
     } else {
       await addDoc(usageCol, { particular, unit, qty, remarks, usedAt: serverTimestamp(), fromRequestId: linkedRequestId ?? null });
       showToast("✅ Usage added");
-      if(linkedRequestId){
-        await decrementUsageRemaining(linkedRequestId, qty);
-      }
+      if(linkedRequestId) await decrementUsageRemaining(linkedRequestId, qty);
     }
     closeModal(editUsageModal);
-  } catch(e){ console.error(e); showToast("⚠️ Save failed"); }
+  } catch(e){ console.error("saveUsage error", e); showToast("⚠️ Save failed"); }
 });
 
 // usage live listener
@@ -513,19 +490,18 @@ async function decrementUsageRemaining(requestId, delta){
   } catch(err){ console.error("decrementUsageRemaining error:", err); }
 }
 
-// ---------- Remaining: compute and show ----------
-safeAddListener(viewRemainingBtn, "click", ()=> { computeAndRenderRemaining(); openModal(remainingModal); });
+// ---------- Remaining / History / Print helpers ----------
+safeAddListener($id("viewRemainingBtn"), "click", ()=> { computeAndRenderRemaining(); openModal(remainingModal); });
 safeAddListener(closeRemainingBtn, "click", ()=> closeModal(remainingModal));
 safeAddListener(closeRemainingBtnTop, "click", ()=> closeModal(remainingModal));
 safeAddListener(searchRemaining, "input", ()=> filterTableRows(remainingTbody, searchRemaining.value));
-safeAddListener(printRemainingBtn, "click", ()=> printTable("Remaining Inventory", document.getElementById("remainingTable")));
+safeAddListener(printRemainingBtn, "click", ()=> printTable("Remaining Inventory", $id("remainingTable")));
 
 async function computeAndRenderRemaining(){
   const reqSnap = await getDocs(requestsCol);
   const delSnap = await getDocs(deliveredCol);
   const usSnap = await getDocs(usageCol);
-  const totals = {}; // key -> {particular, requested, delivered, used}
-
+  const totals = {};
   reqSnap.forEach(s => {
     const d = s.data();
     const k = normKey(d.particular);
@@ -547,10 +523,7 @@ async function computeAndRenderRemaining(){
 
   if(remainingTbody) remainingTbody.innerHTML = "";
   const keys = Object.keys(totals).sort();
-  if(keys.length === 0){
-    if(remainingTbody) remainingTbody.innerHTML = `<tr><td colspan="5">No data</td></tr>`;
-    return;
-  }
+  if(keys.length === 0){ if(remainingTbody) remainingTbody.innerHTML = `<tr><td colspan="5">No data</td></tr>`; return; }
   keys.forEach(k=>{
     const it = totals[k];
     const remaining = (it.delivered || 0) - (it.used || 0);
@@ -563,12 +536,11 @@ async function computeAndRenderRemaining(){
   });
 }
 
-// ---------- History (monthly totals) ----------
 safeAddListener(viewHistoryBtn, "click", async ()=> { await renderHistory(); openModal(historyModal); });
 safeAddListener(closeHistoryBtn, "click", ()=> closeModal(historyModal));
 safeAddListener(closeHistoryBtnTop, "click", ()=> closeModal(historyModal));
 safeAddListener(searchHistory, "input", ()=> filterTableRows(historyTbody, searchHistory.value));
-safeAddListener(printHistoryBtn, "click", ()=> printTable("History Usage", document.getElementById("historyTable")));
+safeAddListener(printHistoryBtn, "click", ()=> printTable("History Usage", $id("historyTable")));
 
 async function renderHistory(){
   const snaps = await getDocs(usageCol);
@@ -582,10 +554,7 @@ async function renderHistory(){
   });
   if(historyTbody) historyTbody.innerHTML = "";
   const keys = Object.keys(totals).sort();
-  if(keys.length === 0){
-    if(historyTbody) historyTbody.innerHTML = `<tr><td colspan="3">No history</td></tr>`;
-    return;
-  }
+  if(keys.length === 0){ if(historyTbody) historyTbody.innerHTML = `<tr><td colspan="3">No history</td></tr>`; return; }
   keys.forEach(k=>{
     const [particular, month] = k.split("||");
     const [y,m] = month.split("-");
@@ -598,16 +567,33 @@ async function renderHistory(){
   });
 }
 
-// ---------- Helpers to populate selects ----------
+function printTable(title, tableEl){
+  if(!tableEl){ showToast("⚠️ Table not found"); return; }
+  const html = `
+    <html>
+      <head><title>${escapeHtml(title)}</title>
+      <style>
+        body{ font-family: Arial, Helvetica, sans-serif; padding:20px; color:#000 }
+        h1{ font-size:18px; margin-bottom:8px }
+        table{ width:100%; border-collapse:collapse; margin-top:10px }
+        th,td{ border:1px solid #ddd; padding:8px; text-align:left; font-size:12px }
+        th{ background:#f4f4f4; font-weight:700 }
+      </style></head>
+      <body><h1>${escapeHtml(title)}</h1><div>Printed: ${new Date().toLocaleString()}</div>${tableEl.outerHTML}</body>
+    </html>`;
+  const w = window.open("", "_blank", "width=900,height=700");
+  if(!w){ showToast("⚠️ Popup blocked. Allow popups to print."); return; }
+  w.document.open(); w.document.write(html); w.document.close(); w.focus(); setTimeout(()=> w.print(), 350);
+}
+
+// ---------- Select fill helpers ----------
 function fillDeliveredSelect(requests){
   if(!deliveredRequestSelect) return;
   deliveredRequestSelect.innerHTML = `<option value="">-- Select a submitted request --</option>`;
-  // alphabetize by particular then personnel
-  requests.sort((a,b)=> {
+  requests.sort((a,b)=>{
     const ka = (a.particular||"").toLowerCase();
     const kb = (b.particular||"").toLowerCase();
-    if(ka < kb) return -1;
-    if(ka > kb) return 1;
+    if(ka < kb) return -1; if(ka > kb) return 1;
     return (a.personnel||"").toLowerCase().localeCompare((b.personnel||"").toLowerCase());
   });
   requests.forEach(r=>{
@@ -631,25 +617,22 @@ function fillDeliveredSelect(requests){
     }
   };
 
-  if(deliveredRequestSearch){
-    deliveredRequestSearch.oninput = () => {
-      const q = deliveredRequestSearch.value.toLowerCase().trim();
-      Array.from(deliveredRequestSelect.options).forEach(opt=>{
-        if(!opt.value){ opt.hidden = false; return; } // keep placeholder visible
-        opt.hidden = !(opt.text.toLowerCase().includes(q));
-      });
-    };
-  }
+  if(deliveredRequestSearch) deliveredRequestSearch.oninput = () => {
+    const q = deliveredRequestSearch.value.toLowerCase().trim();
+    Array.from(deliveredRequestSelect.options).forEach(opt=>{
+      if(!opt.value){ opt.hidden = false; return; }
+      opt.hidden = !(opt.text.toLowerCase().includes(q));
+    });
+  };
 }
 
 function fillUsageSelect(requests){
   if(!usageRequestSelect) return;
   usageRequestSelect.innerHTML = `<option value="">-- Select a submitted request --</option>`;
-  requests.sort((a,b)=> {
+  requests.sort((a,b)=>{
     const ka = (a.particular||"").toLowerCase();
     const kb = (b.particular||"").toLowerCase();
-    if(ka < kb) return -1;
-    if(ka > kb) return 1;
+    if(ka < kb) return -1; if(ka > kb) return 1;
     return (a.personnel||"").toLowerCase().localeCompare((b.personnel||"").toLowerCase());
   });
   requests.forEach(r=>{
@@ -673,33 +656,26 @@ function fillUsageSelect(requests){
     }
   };
 
-  if(usageRequestSearch){
-    usageRequestSearch.oninput = () => {
-      const q = usageRequestSearch.value.toLowerCase().trim();
-      Array.from(usageRequestSelect.options).forEach(opt=>{
-        if(!opt.value){ opt.hidden = false; return; }
-        opt.hidden = !(opt.text.toLowerCase().includes(q));
-      });
-    };
-  }
+  if(usageRequestSearch) usageRequestSearch.oninput = () => {
+    const q = usageRequestSearch.value.toLowerCase().trim();
+    Array.from(usageRequestSelect.options).forEach(opt=>{
+      if(!opt.value){ opt.hidden = false; return; }
+      opt.hidden = !(opt.text.toLowerCase().includes(q));
+    });
+  };
 }
 
-// Boot - initial fill of selects (one-shot)
+// Boot initial selects
 (async function boot(){
   try{
     const reqSnap = await getDocs(requestsCol);
-    const arrD = [];
-    const arrU = [];
+    const arrD = []; const arrU = [];
     reqSnap.forEach(s=>{
       const d = s.data();
       const remD = remainingForDelivered(d);
       const remU = remainingForUsage(d);
-      if(!d.deliveredFulfilled && remD > 0){
-        arrD.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
-      }
-      if(!d.usageFulfilled && remU > 0){
-        arrU.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
-      }
+      if(!d.deliveredFulfilled && remD > 0) arrD.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
+      if(!d.usageFulfilled && remU > 0) arrU.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
     });
     fillDeliveredSelect(arrD);
     fillUsageSelect(arrU);
@@ -707,105 +683,27 @@ function fillUsageSelect(requests){
 })();
 
 // convenience loaders
-async function loadDeliveredRecords() {
-  if(!deliveredTbody) return;
-  deliveredTbody.innerHTML = "";
-  const snap = await getDocs(deliveredCol);
-  snap.forEach(docSnap=>{
-    const d = docSnap.data();
-    const date = fmtDate(d.deliveredAt);
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td>
-      <td>${escapeHtml(d.unit)}</td><td>${d.qty}</td><td>${escapeHtml(d.status||"pending")}</td><td>${date}</td><td></td>`;
-    deliveredTbody.appendChild(tr);
-  });
-}
+async function loadDeliveredRecords(){ if(!deliveredTbody) return; deliveredTbody.innerHTML = ""; const snap = await getDocs(deliveredCol); snap.forEach(s=>{ const d = s.data(); const date = fmtDate(d.deliveredAt); const tr = document.createElement("tr"); tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td><td>${escapeHtml(d.unit)}</td><td>${d.qty}</td><td>${escapeHtml(d.status||"pending")}</td><td>${date}</td><td></td>`; deliveredTbody.appendChild(tr); }); }
+async function loadUsageRecords(){ if(!usageTbody) return; usageTbody.innerHTML = ""; const snap = await getDocs(usageCol); snap.forEach(s=>{ const d = s.data(); const date = fmtDate(d.usedAt); const tr = document.createElement("tr"); tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td><td>${escapeHtml(d.unit)}</td><td>${d.qty}</td><td>${date}</td><td>${escapeHtml(d.remarks||"")}</td><td></td>`; usageTbody.appendChild(tr); }); }
+async function loadRemainingRecords(){ await computeAndRenderRemaining(); }
+async function loadMaterialHistory(){ await renderHistory(); }
 
-async function loadUsageRecords() {
-  if(!usageTbody) return;
-  usageTbody.innerHTML = "";
-  const snap = await getDocs(usageCol);
-  snap.forEach(docSnap=>{
-    const d = docSnap.data();
-    const date = fmtDate(d.usedAt);
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td>
-      <td>${escapeHtml(d.unit)}</td><td>${d.qty}</td><td>${date}</td><td>${escapeHtml(d.remarks||"")}</td><td></td>`;
-    usageTbody.appendChild(tr);
-  });
-}
-async function loadRemainingRecords() { await computeAndRenderRemaining(); }
-async function loadMaterialHistory() { await renderHistory(); }
+window.addEventListener("load", ()=>{ loadDeliveredRecords(); loadUsageRecords(); loadRemainingRecords(); loadMaterialHistory(); });
 
-// initial load
-window.addEventListener("load", () => {
-  loadDeliveredRecords();
-  loadUsageRecords();
-  loadRemainingRecords();
-  loadMaterialHistory();
-});
-
-// ---------- Table filter helper ----------
-function filterTableRows(tbodyEl, queryText){
-  if(!tbodyEl) return;
-  const q = (queryText || "").toString().toLowerCase().trim();
-  Array.from(tbodyEl.querySelectorAll("tr")).forEach(tr=>{
-    const txt = tr.textContent.toLowerCase();
-    tr.style.display = txt.includes(q) ? "" : "none";
-  });
-}
-
-// ---------- Print helper (prints table with title & timestamp) ----------
-function printTable(title, tableEl){
-  if(!tableEl) { showToast("⚠️ Table not found"); return; }
-  const html = `
-    <html>
-      <head>
-        <title>${escapeHtml(title)}</title>
-        <style>
-          body{ font-family: Arial, Helvetica, sans-serif; padding:20px; color:#000 }
-          h1{ font-size:18px; margin-bottom:8px }
-          table{ width:100%; border-collapse:collapse; margin-top:10px }
-          th,td{ border:1px solid #ddd; padding:8px; text-align:left; font-size:12px }
-          th{ background:#f4f4f4; font-weight:700 }
-        </style>
-      </head>
-      <body>
-        <h1>${escapeHtml(title)}</h1>
-        <div>Printed: ${new Date().toLocaleString()}</div>
-        ${tableEl.outerHTML}
-      </body>
-    </html>
-  `;
-  const w = window.open("", "_blank", "width=900,height=700");
-  if(!w) { showToast("⚠️ Popup blocked. Allow popups to print."); return; }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  setTimeout(()=> w.print(), 350);
-}
-
-// ---------- Utility: search input hookup for delivered/usage/request tables ----------
+// table filter helpers
+function filterTableRows(tbodyEl, queryText){ if(!tbodyEl) return; const q = (queryText||"").toString().toLowerCase().trim(); Array.from(tbodyEl.querySelectorAll("tr")).forEach(tr=>{ const txt = tr.textContent.toLowerCase(); tr.style.display = txt.includes(q) ? "" : "none"; }); }
 safeAddListener(searchDelivered, "input", ()=> filterTableRows(deliveredTbody, searchDelivered.value));
 safeAddListener(searchUsage, "input", ()=> filterTableRows(usageTbody, searchUsage.value));
-// searchRequests hooked above once
 
-// ---------- Boot note: ensure selects update when requests change ----------
+// update selects when requests change (keeps delivered/usage selects in sync)
 onSnapshot(requestsQ, snapshot=>{
-  // rebuild selectable arrays for delivered/usage selects
-  const arrD = [];
-  const arrU = [];
+  const arrD = []; const arrU = [];
   snapshot.forEach(s=>{
     const d = s.data();
     const remD = remainingForDelivered(d);
     const remU = remainingForUsage(d);
-    if(!d.deliveredFulfilled && remD > 0){
-      arrD.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
-    }
-    if(!d.usageFulfilled && remU > 0){
-      arrU.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
-    }
+    if(!d.deliveredFulfilled && remD > 0) arrD.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
+    if(!d.usageFulfilled && remU > 0) arrU.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
   });
   fillDeliveredSelect(arrD);
   fillUsageSelect(arrU);
