@@ -1,32 +1,12 @@
-// ================== CONFIG ==================
-const cloudName = "dtmm8frik";
-const uploadPreset = "Crrd2025";
-const GM_APPROVAL_CODE = "CRRD";
-
-// ================== Firebase imports ==================
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+// script.js (module) - Firestore-backed dashboard (cleaned, deduplicated, fixed)
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-analytics.js";
 import {
-  getAuth,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  sendPasswordResetEmail,
-  signOut,
-  onAuthStateChanged,
-  updateProfile
-} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-import {
-  getFirestore,
-  collection,
-  addDoc,
-  getDocs,
-  doc,
-  setDoc,
-  getDoc,
-  updateDoc,
-  serverTimestamp
-} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+  getFirestore, collection, addDoc, onSnapshot, serverTimestamp,
+  query, orderBy, deleteDoc, doc, updateDoc, getDocs, where, writeBatch, getDoc
+} from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
-// Firebase config (user provided)
+// ---------- CONFIG ----------
 const firebaseConfig = {
   apiKey: "AIzaSyCMhwCdyBmC3037SScytAYGmiXXnFiwFbI",
   authDomain: "request-materials-4b168.firebaseapp.com",
@@ -37,477 +17,796 @@ const firebaseConfig = {
   measurementId: "G-F4FR8YJD99"
 };
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+try { getAnalytics(app); } catch (e) { /* ignore analytics errors */ }
 const db = getFirestore(app);
 
-// ================== UI elements ==================
-const loginCard = document.getElementById("loginCard");
-const registerCard = document.getElementById("registerCard");
-const forgotCard = document.getElementById("forgotCard");
+// cloudinary placeholders (not used but left for future)
+const cloudName = "dtmm8frik";
+const uploadPreset = "Crrd2025";
 
-const loginEmail = document.getElementById("loginEmail");
-const loginPassword = document.getElementById("loginPassword");
-const loginBtn = document.getElementById("loginBtn");
-const toRegister = document.getElementById("toRegister");
-const toLoginFromReg = document.getElementById("toLoginFromReg");
-const toForgot = document.getElementById("toForgot");
-const backToLogin = document.getElementById("backToLogin");
+// ---------- COLLECTIONS ----------
+const requestsCol = collection(db, "requests");
+const deliveredCol = collection(db, "delivered");
+const usageCol = collection(db, "usage");
 
-const regName = document.getElementById("regName");
-const regEmail = document.getElementById("regEmail");
-const regPassword = document.getElementById("regPassword");
-const regRole = document.getElementById("regRole");
-const regApproval = document.getElementById("regApproval");
-const registerBtn = document.getElementById("registerBtn");
+// ---------- UI REFS (safely get by id) ----------
+function $id(id){ return document.getElementById(id); }
 
-const forgotEmail = document.getElementById("forgotEmail");
-const forgotBtn = document.getElementById("forgotBtn");
+const submitRequestBtn = $id("submitRequestBtn");
+const submitModal = $id("submitModal");
+const exitModalBtn = $id("exitModalBtn");
+const submitDataBtn = $id("submitDataBtn");
+const dateEl = $id("date");
+const personnelEl = $id("personnel");
+const particularEl = $id("particular");
+const unitEl = $id("unit");
+const qtyEl = $id("qty");
+const toastEl = $id("toast");
 
-const dashboard = document.getElementById("dashboard");
-const authWrap = document.getElementById("authWrap");
-const logoutBtn = document.getElementById("logoutBtn");
-const userNameDisplay = document.getElementById("userNameDisplay");
-const homeBtn = document.getElementById("homeBtn");
+const viewRequestBtn = $id("viewRequestBtn");
+const viewRequestModal = $id("viewRequestModal");
+const requestsTbody = $id("requestsTbody");
+const closeRequestsBtn = $id("closeRequestsBtn");
+const closeRequestsBtnTop = $id("closeRequestsBtnTop");
+const openAddDeliveredFromRequestsBtn = $id("openAddDeliveredFromRequestsBtn");
+const openAddUsageFromRequestsBtn = $id("openAddUsageFromRequestsBtn");
+const searchRequests = $id("searchRequests");
+const printRequestsBtn = $id("printRequestsBtn");
 
-const reqForm = document.getElementById("reqForm");
-const reqDate = document.getElementById("reqDate");
-const reqParticular = document.getElementById("reqParticular");
-const reqUnit = document.getElementById("reqUnit");
-const reqQty = document.getElementById("reqQty");
-const upload_widget_btn = document.getElementById("upload_widget");
-const uploadedURL = document.getElementById("uploadedURL");
-const uploadName = document.getElementById("uploadName");
+const viewDeliveredBtn = $id("viewDeliveredBtn");
+const deliveredModal = $id("deliveredModal");
+const deliveredTbody = $id("deliveredTbody");
+const closeDeliveredBtn = $id("closeDeliveredBtn");
+const closeDeliveredBtnTop = $id("closeDeliveredBtnTop");
+const addDeliveredBtn = $id("addDeliveredBtn");
+const searchDelivered = $id("searchDelivered");
+const printDeliveredBtn = $id("printDeliveredBtn");
 
-const btnViewRequest = document.getElementById("btnViewRequest");
-const btnViewRemaining = document.getElementById("btnViewRemaining");
-const btnViewStatus = document.getElementById("btnViewStatus");
-const btnViewApprovals = document.getElementById("btnViewApprovals");
-const btnViewUsage = document.getElementById("btnViewUsage");
+// edit delivered modal
+const editDeliveredModal = $id("editDeliveredModal");
+const editDeliveredTitle = $id("editDeliveredTitle");
+const deliveredRequestSelect = $id("deliveredRequestSelect");
+const deliveredRequestSearch = $id("deliveredRequestSearch");
+const editDeliveredParticular = $id("editDeliveredParticular");
+const editDeliveredUnit = $id("editDeliveredUnit");
+const editDeliveredQty = $id("editDeliveredQty");
+const saveDeliveredBtn = $id("saveDeliveredBtn");
+const cancelEditDeliveredBtn = $id("cancelEditDeliveredBtn");
 
-const totalReq = document.getElementById("totalReq");
-const totalPending = document.getElementById("totalPending");
-const totalApproved = document.getElementById("totalApproved");
-const recentList = document.getElementById("recentList");
+const viewRemainingBtn = $id("viewRemainingBtn");
+const remainingModal = $id("remainingModal");
+const remainingTbody = $id("remainingTbody");
+const closeRemainingBtn = $id("closeRemainingBtn");
+const closeRemainingBtnTop = $id("closeRemainingBtnTop");
+const searchRemaining = $id("searchRemaining");
+const printRemainingBtn = $id("printRemainingBtn");
 
-const modal = document.getElementById("modal");
-const modalContent = document.getElementById("modalContent");
-const modalClose = document.getElementById("modalClose");
+const viewUsageBtn = $id("viewUsageBtn");
+const usageModal = $id("usageModal");
+const usageTbody = $id("usageTbody");
+const closeUsageBtn = $id("closeUsageBtn");
+const closeUsageBtnTop = $id("closeUsageBtnTop");
+const addUsageBtn = $id("addUsageBtn");
+const searchUsage = $id("searchUsage");
+const printUsageBtn = $id("printUsageBtn");
 
-// ================== Toast ==================
-function showToast(message, type = "success") {
-  const c = document.getElementById("toastContainer");
-  const t = document.createElement("div");
-  t.className = "toast " + (type === "error" ? "error" : type === "info" ? "info" : "success");
-  t.textContent = message;
-  c.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
+// edit usage modal
+const editUsageModal = $id("editUsageModal");
+const editUsageTitle = $id("editUsageTitle");
+const usageRequestSelect = $id("usageRequestSelect");
+const usageRequestSearch = $id("usageRequestSearch");
+const editUsageParticular = $id("editUsageParticular");
+const editUsageUnit = $id("editUsageUnit");
+const editUsageQty = $id("editUsageQty");
+const editUsageRemarks = $id("editUsageRemarks");
+const saveUsageBtn = $id("saveUsageBtn");
+const cancelEditUsageBtn = $id("cancelEditUsageBtn");
+
+const viewHistoryBtn = $id("viewHistoryBtn");
+const historyModal = $id("historyModal");
+const historyTbody = $id("historyTbody");
+const closeHistoryBtn = $id("closeHistoryBtn");
+const closeHistoryBtnTop = $id("closeHistoryBtnTop");
+const searchHistory = $id("searchHistory");
+const printHistoryBtn = $id("printHistoryBtn");
+
+// editing state
+let editingDeliveredId = null;
+let editingUsageId = null;
+
+// local cached requests for selects / quick lookup
+let latestRequestsArray = [];
+
+// ---------- small safe helpers ----------
+function safeAddListener(el, ev, fn){
+  if(!el) return;
+  el.addEventListener(ev, fn);
+}
+function openModal(el){
+  if(!el) return;
+  el.classList.add("fullscreen");
+  el.style.display = "flex";
+  el.setAttribute("aria-hidden","false");
+  document.body.style.overflow = "hidden";
+}
+function closeModal(el){
+  if(!el) return;
+  el.style.display = "none";
+  el.classList.remove("fullscreen");
+  el.setAttribute("aria-hidden","true");
+  document.body.style.overflow = "";
+}
+function showToast(msg){
+  if(!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.className = "show";
+  setTimeout(()=> toastEl.className = "", 3000);
+}
+function fmtDate(ts){
+  try{ return ts?.toDate ? ts.toDate().toLocaleString() : new Date(ts).toLocaleString(); } catch(e){ return ""; }
+}
+function escapeHtml(s){ if(!s) return ""; return s.toString().replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
+function normKey(s){ return (s||"").toString().toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""); }
+
+// compute remaining helpers
+function remainingForDelivered(req) {
+  if(req?.remainingForDelivered != null) return Number(req.remainingForDelivered);
+  return Number(req.qty ?? 0);
+}
+function remainingForUsage(req) {
+  if(req?.remainingForUsage != null) return Number(req.remainingForUsage);
+  return Number(req.qty ?? 0);
 }
 
-// ================== Navigation UI ==================
-toRegister.onclick = () => { loginCard.classList.add("hidden"); registerCard.classList.remove("hidden"); };
-toLoginFromReg.onclick = () => { registerCard.classList.add("hidden"); loginCard.classList.remove("hidden"); };
-toForgot.onclick = (e) => { e.preventDefault(); loginCard.classList.add("hidden"); forgotCard.classList.remove("hidden"); };
-backToLogin.onclick = () => { forgotCard.classList.add("hidden"); loginCard.classList.remove("hidden"); };
-regRole.addEventListener("change", (e) => regApproval.classList.toggle("hidden", e.target.value !== "GM"));
-
-// ================== Register (Auth + Firestore user doc) ==================
-registerBtn.onclick = async () => {
-  const name = regName.value.trim(), email = regEmail.value.trim(), pass = regPassword.value.trim(), role = regRole.value, code = regApproval.value.trim();
-  if (!name || !email || !pass || !role) { showToast("Please fill out all required fields.", "error"); return; }
-  if (role === "GM" && code !== GM_APPROVAL_CODE) { showToast("Approval code invalid. Please contact admin.", "error"); return; }
-
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    await updateProfile(cred.user, { displayName: name });
-    await setDoc(doc(db, "users", cred.user.uid), {
-      name,
-      email,
-      role,
-      dateCreated: serverTimestamp()
-    });
-    showToast("Registration Successful!", "success");
-    registerCard.classList.add("hidden"); loginCard.classList.remove("hidden");
-    regName.value = regEmail.value = regPassword.value = regApproval.value = ""; regRole.value = "";
-  } catch (err) {
-    console.error(err);
-    showToast(err.message || "Registration failed.", "error");
-  }
-};
-
-// ================== Forgot password ==================
-forgotBtn.onclick = async () => {
-  const email = forgotEmail.value.trim();
-  if (!email) { showToast("Please enter email.", "error"); return; }
-  try {
-    await sendPasswordResetEmail(auth, email);
-    showToast("Password reset link sent to your email.", "info");
-    forgotEmail.value = ""; forgotCard.classList.add("hidden"); loginCard.classList.remove("hidden");
-  } catch (err) {
-    console.error(err);
-    showToast(err.message || "Error sending reset link.", "error");
-  }
-};
-
-// ================== Login ==================
-loginBtn.onclick = async () => {
-  const email = loginEmail.value.trim(), pass = loginPassword.value.trim();
-  if (!email || !pass) { showToast("Invalid credentials. Please try again.", "error"); return; }
-  try {
-    await signInWithEmailAndPassword(auth, email, pass);
-  } catch (err) {
-    console.error(err);
-    showToast("Invalid credentials. Please try again.", "error");
-  }
-};
-
-// Auth state listener
-onAuthStateChanged(auth, async (user) => {
-  if (user) {
-    // fetch user role from Firestore
-    try {
-      const uDoc = await getDoc(doc(db, "users", user.uid));
-      const role = uDoc.exists() ? uDoc.data().role : "Maintenance";
-      user.role = role;
-    } catch (e) {
-      user.role = "Maintenance";
-    }
-    // set global current user reference
-    window.currentUser = user;
-    authWrap.classList.add("hidden"); dashboard.classList.remove("hidden");
-    userNameDisplay.textContent = user.displayName || user.email;
-    logoutBtn.classList.remove("hidden");
-    document.querySelectorAll(".gm-only").forEach(el => el.classList.toggle("hidden", user.role !== "GM"));
-    refreshSummary();
-  } else {
-    window.currentUser = null;
-    authWrap.classList.remove("hidden"); dashboard.classList.add("hidden");
-    logoutBtn.classList.add("hidden"); userNameDisplay.textContent = "";
-  }
+// ---------- Submit Request ----------
+safeAddListener(submitRequestBtn, "click", ()=>{
+  if(dateEl) dateEl.value = new Date().toLocaleString();
+  openModal(submitModal);
 });
+safeAddListener(exitModalBtn, "click", ()=> closeModal(submitModal));
 
-// logout
-logoutBtn.onclick = async () => {
-  try { await signOut(auth); showToast("Logged out.", "info"); } catch (err) { console.error(err); showToast("Error logging out.", "error"); }
-};
-homeBtn.onclick = () => { closeModal(); window.scrollTo({ top:0, behavior:"smooth" }); };
-
-// ================== Cloudinary Upload Widget ==================
-const widget = cloudinary.createUploadWidget({
-  cloudName,
-  uploadPreset,
-  folder: "activity_reports",
-  multiple: false,
-  maxFileSize: 5 * 1024 * 1024,
-  sources: ["local", "camera", "url"]
-}, (err, result) => {
-  if (!err && result && result.event === "success") {
-    uploadedURL.value = result.info.secure_url;
-    uploadName.textContent = (result.info.original_filename || "file") + "." + (result.info.format || "");
-    showToast("File uploaded successfully!", "success");
-  } else if (err) {
-    console.error(err);
-    showToast("Upload error.", "error");
-  }
-});
-upload_widget_btn.addEventListener("click", () => widget.open(), false);
-
-// ================== Submit Request (Firestore) ==================
-reqDate.value = new Date().toLocaleString();
-reqForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const user = window.currentUser;
-  if (!user) { showToast("Please login first.", "error"); return; }
-  const particular = reqParticular.value.trim(), unit = reqUnit.value.trim(), qty = parseInt(reqQty.value), file = uploadedURL.value || "";
-  if (!particular || !unit || !qty || qty <= 0) { showToast("Error submitting request. Please check your input.", "error"); return; }
-
-  try {
-    await addDoc(collection(db, "requests"), {
-      userId: user.uid,
-      userName: user.displayName || user.email,
-      date: new Date().toLocaleString(),
-      particular,
-      unit,
-      qty,
-      fileURL: file,
-      status: "Pending",
-      remarks: "",
-      usedQty: 0,
+safeAddListener(submitDataBtn, "click", async ()=>{
+  const personnel = personnelEl?.value.trim();
+  const particular = particularEl?.value.trim();
+  const unit = unitEl?.value.trim();
+  const qty = Number(qtyEl?.value);
+  if(!personnel || !particular || !unit || !qty || qty <= 0){ showToast("⚠️ Fill all fields"); return; }
+  try{
+    await addDoc(requestsCol, {
+      personnel, particular, unit, qty,
+      remainingForDelivered: qty,
+      remainingForUsage: qty,
+      deliveredFulfilled: false,
+      usageFulfilled: false,
       createdAt: serverTimestamp()
     });
-    showToast("Request submitted successfully!", "success");
-    reqParticular.value = reqUnit.value = reqQty.value = ""; uploadedURL.value = ""; uploadName.textContent = "No file";
-    refreshSummary();
-  } catch (err) {
-    console.error(err);
-    showToast("Error submitting request.", "error");
+    showToast("✅ Request submitted");
+    if(personnelEl) personnelEl.value = "";
+    if(particularEl) particularEl.value = "";
+    if(unitEl) unitEl.value = "";
+    if(qtyEl) qtyEl.value = "";
+    closeModal(submitModal);
+  } catch(e){ console.error(e); showToast("⚠️ Submit failed"); }
+});
+
+// ---------- Requests live listener ----------
+const requestsQ = query(requestsCol, orderBy("createdAt","desc"));
+
+onSnapshot(requestsQ, snapshot=>{
+  if(requestsTbody) requestsTbody.innerHTML = "";
+  const deliveredSelectList = [];
+  const usageSelectList = [];
+  latestRequestsArray = [];
+
+  snapshot.forEach(docSnap=>{
+    const d = docSnap.data(); const id = docSnap.id;
+    const remD = remainingForDelivered(d);
+    const remU = remainingForUsage(d);
+    const date = fmtDate(d.createdAt);
+    const remLabel = `D:${remD} | U:${remU}`;
+
+    // local cache
+    latestRequestsArray.push({ id, ...d, remainingForDelivered: remD, remainingForUsage: remU, createdAt: d.createdAt });
+
+    if(requestsTbody){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td style="text-align:left;padding-left:10px">${escapeHtml(d.personnel)}</td>
+        <td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td>
+        <td>${escapeHtml(d.unit)}</td>
+        <td>${d.qty ?? 0}</td>
+        <td>${remLabel}</td>
+        <td>${date}</td>
+        <td>
+          <button class="table-btn small-delete" data-id="${id}" data-action="delete">Delete</button>
+        </td>
+      `;
+      requestsTbody.appendChild(tr);
+    }
+
+    if(!d.deliveredFulfilled && remD > 0) {
+      deliveredSelectList.push({ id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
+    }
+    if(!d.usageFulfilled && remU > 0) {
+      usageSelectList.push({ id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
+    }
+  });
+
+  // bind delete buttons (scoped)
+  if(requestsTbody){
+    requestsTbody.querySelectorAll("button[data-action='delete']").forEach(btn=>{
+      btn.onclick = async () => {
+        const id = btn.dataset.id;
+        if(!confirm("Delete this request and all related Delivered & Usage records?")) return;
+        try{
+          await cascadeDeleteRequest(id);
+          showToast("✅ Request and related records deleted");
+        } catch(err){ console.error(err); showToast("⚠️ Delete failed"); }
+      };
+    });
+  }
+
+  // fill selects
+  fillDeliveredSelect(deliveredSelectList);
+  fillUsageSelect(usageSelectList);
+});
+
+// open/close request modal
+safeAddListener(viewRequestBtn, "click", ()=> openModal(viewRequestModal));
+safeAddListener(closeRequestsBtn, "click", ()=> closeModal(viewRequestModal));
+safeAddListener(closeRequestsBtnTop, "click", ()=> closeModal(viewRequestModal));
+
+// search requests (filter table rows) - single hookup
+safeAddListener(searchRequests, "input", ()=> filterTableRows(requestsTbody, searchRequests.value));
+safeAddListener(printRequestsBtn, "click", ()=> printTable("Requests", document.getElementById("requestsTable")));
+
+// open add delivered/usage from requests
+safeAddListener(openAddDeliveredFromRequestsBtn, "click", ()=>{
+  editingDeliveredId = null;
+  if(editDeliveredTitle) editDeliveredTitle.textContent = "Add Delivered (select request)";
+  if(editDeliveredParticular) editDeliveredParticular.value = "";
+  if(editDeliveredUnit) editDeliveredUnit.value = "";
+  if(editDeliveredQty) editDeliveredQty.value = 1;
+  if(deliveredRequestSelect) deliveredRequestSelect.value = "";
+  openModal(editDeliveredModal);
+});
+safeAddListener(openAddUsageFromRequestsBtn, "click", ()=>{
+  editingUsageId = null;
+  if(editUsageTitle) editUsageTitle.textContent = "Add Usage (select request)";
+  if(editUsageParticular) editUsageParticular.value = "";
+  if(editUsageUnit) editUsageUnit.value = "";
+  if(editUsageQty) editUsageQty.value = 1;
+  if(editUsageRemarks) editUsageRemarks.value = "";
+  if(usageRequestSelect) usageRequestSelect.value = "";
+  openModal(editUsageModal);
+});
+
+// cascade delete (request + related delivered + usage)
+async function cascadeDeleteRequest(requestId){
+  const batch = writeBatch(db);
+  const reqRef = doc(db, "requests", requestId);
+  batch.delete(reqRef);
+
+  const delQ = query(deliveredCol, where("fromRequestId", "==", requestId));
+  const delSnap = await getDocs(delQ);
+  delSnap.forEach(s => batch.delete(doc(db, "delivered", s.id)));
+
+  const usageQ = query(usageCol, where("fromRequestId", "==", requestId));
+  const usageSnap = await getDocs(usageQ);
+  usageSnap.forEach(s => batch.delete(doc(db, "usage", s.id)));
+
+  await batch.commit();
+}
+
+// ---------- Delivered add/edit/toggle ----------
+safeAddListener(viewDeliveredBtn, "click", ()=> openModal(deliveredModal));
+safeAddListener(closeDeliveredBtn, "click", ()=> closeModal(deliveredModal));
+safeAddListener(closeDeliveredBtnTop, "click", ()=> closeModal(deliveredModal));
+
+safeAddListener(addDeliveredBtn, "click", ()=>{
+  editingDeliveredId = null;
+  if(editDeliveredTitle) editDeliveredTitle.textContent = "Add Delivered";
+  if(deliveredRequestSelect) deliveredRequestSelect.value = "";
+  if(editDeliveredParticular) editDeliveredParticular.value = "";
+  if(editDeliveredUnit) editDeliveredUnit.value = "";
+  if(editDeliveredQty) editDeliveredQty.value = 1;
+  openModal(editDeliveredModal);
+});
+safeAddListener(cancelEditDeliveredBtn, "click", ()=> closeModal(editDeliveredModal));
+
+safeAddListener(saveDeliveredBtn, "click", async ()=>{
+  const particular = editDeliveredParticular?.value.trim();
+  const unit = editDeliveredUnit?.value.trim();
+  const qty = Number(editDeliveredQty?.value);
+  const linkedRequestId = deliveredRequestSelect?.value || null;
+  if(!particular || !unit || !qty || qty <= 0){ showToast("⚠️ Fill delivered fields"); return; }
+  try{
+    if(editingDeliveredId){
+      await updateDoc(doc(db, "delivered", editingDeliveredId), { particular, unit, qty, updatedAt: serverTimestamp() });
+      showToast("✅ Delivered updated");
+    } else {
+      await addDoc(deliveredCol, {
+        particular, unit, qty, status: "pending", deliveredAt: serverTimestamp(), fromRequestId: linkedRequestId ?? null
+      });
+      showToast("✅ Delivered added");
+      if(linkedRequestId){
+        await decrementDeliveredRemaining(linkedRequestId, qty);
+      }
+    }
+    closeModal(editDeliveredModal);
+  } catch(e){ console.error(e); showToast("⚠️ Save failed"); }
+});
+
+// delivered live listener
+const deliveredQ = query(deliveredCol, orderBy("deliveredAt","desc"));
+onSnapshot(deliveredQ, snapshot=>{
+  if(deliveredTbody) deliveredTbody.innerHTML = "";
+  snapshot.forEach(docSnap=>{
+    const d = docSnap.data(); const id = docSnap.id;
+    const date = fmtDate(d.deliveredAt);
+    const status = d.status || "pending";
+    if(deliveredTbody){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td>
+        <td>${escapeHtml(d.unit)}</td>
+        <td>${d.qty}</td>
+        <td>${escapeHtml(status)}</td>
+        <td>${date}</td>
+        <td>
+          <button class="table-btn small-mark" data-id="${id}" data-action="toggle">${ status === "completed" ? "Mark Pending" : "Mark Completed" }</button>
+          <button class="table-btn small-edit" data-id="${id}" data-action="edit">Edit</button>
+        </td>
+      `;
+      deliveredTbody.appendChild(tr);
+    }
+  });
+
+  // scope only buttons with data-action
+  if(deliveredTbody){
+    deliveredTbody.querySelectorAll("button[data-action]").forEach(btn=>{
+      btn.onclick = async () => {
+        const id = btn.dataset.id;
+        const action = btn.dataset.action;
+        if(action === "toggle"){
+          try{
+            const ref = doc(db, "delivered", id);
+            const snap = await getDoc(ref);
+            if(!snap.exists()) return showToast("Record missing");
+            const current = snap.data().status || "pending";
+            const next = (current === "completed") ? "pending" : "completed";
+            await updateDoc(ref, { status: next, updatedAt: serverTimestamp() });
+            showToast(`Status set to ${next}`);
+          } catch(e){ console.error(e); showToast("⚠️ Toggle failed"); }
+        } else if(action === "edit"){
+          try{
+            const ref = doc(db, "delivered", id);
+            const snap = await getDoc(ref);
+            if(!snap.exists()) return showToast("Record missing");
+            const data = snap.data();
+            editingDeliveredId = id;
+            if(editDeliveredTitle) editDeliveredTitle.textContent = "Edit Delivered";
+            if(deliveredRequestSelect) deliveredRequestSelect.value = data.fromRequestId || "";
+            if(editDeliveredParticular) editDeliveredParticular.value = data.particular || "";
+            if(editDeliveredUnit) editDeliveredUnit.value = data.unit || "";
+            if(editDeliveredQty) editDeliveredQty.value = data.qty || 1;
+            openModal(editDeliveredModal);
+          } catch(e){ console.error(e); showToast("⚠️ Fetch failed"); }
+        }
+      };
+    });
   }
 });
 
-// ================== Helpers: refreshSummary & recent ==================
-async function refreshSummary() {
-  try {
-    const snap = await getDocs(collection(db, "requests"));
-    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    totalReq.textContent = all.length;
-    totalPending.textContent = all.filter(r => r.status === "Pending").length;
-    totalApproved.textContent = all.filter(r => r.status === "Approved").length;
-
-    if (!all.length) { recentList.innerHTML = "<p class='muted small'>No requests yet.</p>"; return; }
-    recentList.innerHTML = "";
-    all.slice(0, 5).forEach(r => {
-      const el = document.createElement("div"); el.className = "request-item";
-      el.innerHTML = `<div>
-        <div style="font-weight:700;color:var(--gold)">${escapeHtml(r.particular)} <span class="small muted">(${escapeHtml(r.unit)})</span></div>
-        <div class="small muted">${escapeHtml(r.userName)} • ${escapeHtml(r.date)}</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-weight:800">${r.qty}</div>
-        <div class="small muted">${r.status}</div>
-      </div>`;
-      recentList.appendChild(el);
-    });
-  } catch (err) {
-    console.error(err);
-  }
+// decrement delivered remaining only (and mark deliveredFulfilled if <=0)
+async function decrementDeliveredRemaining(requestId, delta){
+  try{
+    const reqRef = doc(db, "requests", requestId);
+    const snap = await getDoc(reqRef);
+    if(!snap.exists()) return;
+    const data = snap.data();
+    const cur = Number(data.remainingForDelivered ?? data.qty ?? 0);
+    const newRem = Math.max(cur - Number(delta || 0), 0);
+    if(newRem <= 0){
+      await updateDoc(reqRef, { remainingForDelivered: 0, deliveredFulfilled: true, updatedAt: serverTimestamp() });
+      showToast("✅ Request fulfilled for Delivered (removed from Delivered select)");
+    } else {
+      await updateDoc(reqRef, { remainingForDelivered: newRem, updatedAt: serverTimestamp() });
+      showToast(`✅ Delivered remaining updated: ${newRem}`);
+    }
+  } catch(err){ console.error("decrementDeliveredRemaining error:", err); }
 }
 
-// ================== Modal Helpers ==================
-function openModal(html) { modalContent.innerHTML = html; modal.classList.remove("hidden"); modal.setAttribute("aria-hidden","false"); }
-function closeModal() { modal.classList.add("hidden"); modal.setAttribute("aria-hidden","true"); }
-modalClose.onclick = closeModal; modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+// ---------- Usage add/edit ----------
+safeAddListener(viewUsageBtn, "click", ()=> openModal(usageModal));
+safeAddListener(closeUsageBtn, "click", ()=> closeModal(usageModal));
+safeAddListener(closeUsageBtnTop, "click", ()=> closeModal(usageModal));
 
-// ================== View Requests ==================
-btnViewRequest.onclick = async () => {
-  try {
-    const snap = await getDocs(collection(db, "requests"));
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    let html = `<h3>All Submitted Requests</h3>`;
-    if (!rows.length) html += `<p class="muted">No requests yet.</p>`;
-    else {
-      rows.forEach(r => {
-        html += `<div style="padding:12px;border-radius:10px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));margin-bottom:10px">
-          <div style="display:flex;gap:12px;align-items:center">
-            <div style="flex:1">
-              <div style="font-weight:800">${escapeHtml(r.particular)}</div>
-              <pre style="white-space:pre-wrap;margin:6px 0;background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;color:var(--muted)">${escapeHtml('Submitted by: '+r.userName+' | '+r.date+'\nUnit: '+r.unit+'  Qty: '+r.qty+'\nRemarks: '+(r.remarks||''))}</pre>
-              ${r.fileURL ? `<div class="small muted">Attachment: <a href="${r.fileURL}" target="_blank">view</a></div>` : ''}
-            </div>
-            ${r.fileURL ? `<img src="${r.fileURL}" class="thumb" alt="attachment">` : `<div style="width:120px;text-align:center"><div style="font-weight:900">${r.qty}</div><div class="small muted">${r.status}</div></div>`}
-          </div>
-        </div>`;
-      });
-    }
-    html += `<div class="mt"><button class="btn" id="closeReqBtn">Home</button></div>`;
-    openModal(html); document.getElementById("closeReqBtn").onclick = closeModal;
-  } catch (err) {
-    console.error(err);
-    showToast("Error fetching requests.", "error");
-  }
-};
+safeAddListener(addUsageBtn, "click", ()=>{
+  editingUsageId = null;
+  if(editUsageTitle) editUsageTitle.textContent = "Add Usage";
+  if(usageRequestSelect) usageRequestSelect.value = "";
+  if(editUsageParticular) editUsageParticular.value = "";
+  if(editUsageUnit) editUsageUnit.value = "";
+  if(editUsageQty) editUsageQty.value = 1;
+  if(editUsageRemarks) editUsageRemarks.value = "";
+  openModal(editUsageModal);
+});
+safeAddListener(cancelEditUsageBtn, "click", ()=> closeModal(editUsageModal));
 
-// ================== View Remaining Items ==================
-btnViewRemaining.onclick = async () => {
-  try {
-    const snap = await getDocs(collection(db, "requests"));
-    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const map = {};
-    all.filter(r => r.status === "Approved" || r.status === "Delivered").forEach(r => {
-      const key = `${r.particular}||${r.unit}`;
-      if (!map[key]) map[key] = { particular: r.particular, unit: r.unit, total: 0, used: 0 };
-      map[key].total += r.qty;
-      map[key].used += (r.usedQty || 0);
-    });
-    const rows = Object.values(map);
-    let html = `<h3>Remaining Items</h3>`;
-    if (!rows.length) html += `<p class="muted">No remaining items to display.</p>`;
-    else {
-      html += `<table style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left">Particular</th><th style="text-align:left">Unit</th><th style="text-align:center">Remaining</th></tr></thead><tbody>`;
-      rows.forEach(r => { html += `<tr><td>${escapeHtml(r.particular)}</td><td>${escapeHtml(r.unit)}</td><td style="text-align:center">${Math.max(0, r.total - r.used)}</td></tr>`; });
-      html += `</tbody></table>`;
-    }
-    html += `<div class="mt"><button class="btn" id="closeRemBtn">Home</button></div>`;
-    openModal(html); document.getElementById("closeRemBtn").onclick = closeModal;
-  } catch (err) { console.error(err); showToast("Error computing remaining items.", "error"); }
-};
-
-// ================== View Status Delivery ==================
-btnViewStatus.onclick = async () => {
-  try {
-    const snap = await getDocs(collection(db, "requests"));
-    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    let html = `<h3>All Requests (Status Delivery)</h3>`;
-    if (!rows.length) html += `<p class="muted">No requests found.</p>`;
-    else {
-      rows.forEach(r => {
-        // GM-only status edits; owner can edit remarks only
-        const isOwner = window.currentUser && r.userId === window.currentUser.uid;
-        const isGM = window.currentUser && window.currentUser.role === "GM";
-        html += `<div style="padding:12px;border-radius:10px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between">
-            <div style="flex:1;margin-right:12px">
-              <div style="font-weight:800">${escapeHtml(r.particular)} <span class="small muted">(${escapeHtml(r.unit)})</span></div>
-              <div class="small muted">${escapeHtml(r.userName)} • ${escapeHtml(r.date)}</div>
-              <div class="small muted">Attachment: ${r.fileURL ? `<a href="${r.fileURL}" target="_blank">view</a>` : 'none'}</div>
-            </div>
-            <div style="text-align:right;min-width:110px">
-              <div style="font-weight:900">${r.qty}</div>
-              <div class="small muted">Status: <span id="status_${r.id}">${escapeHtml(r.status)}</span></div>
-            </div>
-          </div>
-          <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="text" id="remark_${r.id}" placeholder="Remarks" style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.03)" value="${escapeHtml(r.remarks||'')}" ${!isOwner ? "readonly" : ""} />
-            ${r.fileURL ? `<img src="${r.fileURL}" class="thumb" alt="attachment">` : ''}
-            ${isGM ? `<div style="display:flex;gap:8px"><button class="btn" data-approve="${r.id}">Approve</button><button class="btn ghost" data-disapprove="${r.id}">Disapprove</button><button class="btn success" data-setdelivered="${r.id}">Set Delivered</button></div>` : ""}
-          </div>
-        </div>`;
-      });
-    }
-    html += `<div class="mt"><button class="btn" id="closeStatusBtn">Home</button></div>`;
-    openModal(html);
-
-    // Attach GM action handlers
-    document.querySelectorAll('[data-approve]').forEach(b => b.onclick = async (e) => {
-      if (!window.currentUser || window.currentUser.role !== "GM") { showToast("Only GM can approve.", "error"); return; }
-      await changeApproval(e.target.dataset.approve, true);
-    });
-    document.querySelectorAll('[data-disapprove]').forEach(b => b.onclick = async (e) => {
-      if (!window.currentUser || window.currentUser.role !== "GM") { showToast("Only GM can disapprove.", "error"); return; }
-      await changeApproval(e.target.dataset.disapprove, false);
-    });
-    document.querySelectorAll('[data-setdelivered]').forEach(b => b.onclick = async (e) => {
-      if (!window.currentUser || window.currentUser.role !== "GM") { showToast("Only GM can set delivered.", "error"); return; }
-      await updateRequestStatus(e.target.dataset.setdelivered, "Delivered");
-      showToast("Marked as Delivered.", "success");
-      closeModal();
-    });
-
-    // remarks: owner can edit (live update)
-    modal.addEventListener("input", async (ev) => {
-      if (ev.target && ev.target.id && ev.target.id.startsWith("remark_")) {
-        const id = ev.target.id.replace("remark_","");
-        try {
-          // only owner allowed to change remarks in UI
-          const rRef = doc(db, "requests", id);
-          const rSnap = await getDoc(rRef);
-          if (!rSnap.exists()) return;
-          const r = rSnap.data();
-          if (!window.currentUser || window.currentUser.uid !== r.userId) return;
-          await updateDoc(rRef, { remarks: ev.target.value });
-          showToast("Remarks updated.", "info");
-          refreshSummary();
-        } catch(e){ console.error(e); }
+safeAddListener(saveUsageBtn, "click", async ()=>{
+  const particular = editUsageParticular?.value.trim();
+  const unit = editUsageUnit?.value.trim();
+  const qty = Number(editUsageQty?.value);
+  const remarks = editUsageRemarks?.value.trim();
+  const linkedRequestId = usageRequestSelect?.value || null;
+  if(!particular || !unit || !qty || qty <= 0){ showToast("⚠️ Fill usage fields"); return; }
+  try{
+    if(editingUsageId){
+      await updateDoc(doc(db, "usage", editingUsageId), { particular, unit, qty, remarks, updatedAt: serverTimestamp() });
+      showToast("✅ Usage updated");
+    } else {
+      await addDoc(usageCol, { particular, unit, qty, remarks, usedAt: serverTimestamp(), fromRequestId: linkedRequestId ?? null });
+      showToast("✅ Usage added");
+      if(linkedRequestId){
+        await decrementUsageRemaining(linkedRequestId, qty);
       }
-    }, { passive: true });
-
-    document.getElementById("closeStatusBtn").onclick = closeModal;
-  } catch (err) { console.error(err); showToast("Error fetching status list.", "error"); }
-};
-
-async function updateRequestStatus(id, status) {
-  try { await updateDoc(doc(db, "requests", id), { status }); refreshSummary(); } catch (err) { console.error(err); showToast("Error updating status.", "error"); }
-}
-
-async function changeApproval(id, approved) {
-  try { await updateDoc(doc(db, "requests", id), { status: approved ? "Approved" : "Disapproved" }); closeModal(); showToast(approved ? "Request approved!" : "Request disapproved.", approved ? "success" : "error"); refreshSummary(); }
-  catch (err) { console.error(err); showToast("Error updating approval.", "error"); }
-}
-
-// ================== View Approvals ==================
-btnViewApprovals.onclick = async () => {
-  if (!window.currentUser || window.currentUser.role !== "GM") { showToast("Only GM can view approvals.", "error"); return; }
-  try {
-    const snap = await getDocs(collection(db, "requests"));
-    const reqs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.status === "Pending");
-    let html = `<h3>Pending Approvals</h3>`;
-    if (!reqs.length) html += `<p class="muted">No pending requests available.</p>`;
-    else {
-      reqs.forEach(r => {
-        html += `<div style="padding:12px;border-radius:10px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-              <div style="font-weight:800">${escapeHtml(r.particular)} <span class="small muted">(${escapeHtml(r.unit)})</span></div>
-              <div class="small muted">${escapeHtml(r.userName)} • ${escapeHtml(r.date)}</div>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <div style="font-weight:900;text-align:right">${r.qty}</div>
-              <div style="display:flex;gap:8px">
-                <button class="btn" data-approve="${r.id}">Approve</button>
-                <button class="btn ghost" data-disapprove="${r.id}">Disapprove</button>
-              </div>
-            </div>
-          </div>
-        </div>`;
-      });
     }
-    html += `<div class="mt"><button class="btn" id="closeAppBtn">Home</button></div>`;
-    openModal(html);
-    document.querySelectorAll("[data-approve]").forEach(b => b.onclick = async (e) => { await changeApproval(e.target.dataset.approve, true); });
-    document.querySelectorAll("[data-disapprove]").forEach(b => b.onclick = async (e) => { await changeApproval(e.target.dataset.disapprove, false); });
-    document.getElementById("closeAppBtn").onclick = closeModal;
-  } catch (err) { console.error(err); showToast("Error fetching approvals.", "error"); }
-};
+    closeModal(editUsageModal);
+  } catch(e){ console.error(e); showToast("⚠️ Save failed"); }
+});
 
-// ================== View Usage ==================
-btnViewUsage.onclick = async () => {
-  try {
-    const snap = await getDocs(collection(db, "requests"));
-    const reqs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.status === "Approved" || r.status === "Delivered");
-    let html = `<h3>View Usage</h3>`;
-    if (!reqs.length) html += `<p class="muted">No usage data yet.</p>`;
-    else {
-      reqs.forEach(r => {
-        const isOwner = window.currentUser && r.userId === window.currentUser.uid;
-        html += `<div style="padding:12px;border-radius:10px;background:linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between">
-            <div style="flex:1">
-              <div style="font-weight:800">${escapeHtml(r.particular)} <span class="small muted">(${escapeHtml(r.unit)})</span></div>
-              <div class="small muted">${escapeHtml(r.userName)} • ${escapeHtml(r.date)}</div>
-            </div>
-            <div style="text-align:right;min-width:120px">
-              <div style="font-weight:900">Total: ${r.qty}</div>
-              <div class="small muted">Used: <span id="used_${r.id}">${r.usedQty || 0}</span></div>
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
-            <input id="useInput_${r.id}" type="number" placeholder="Enter used qty" style="padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);width:120px" ${!isOwner ? "readonly" : ""} />
-            <button class="btn" data-save="${r.id}" ${!isOwner ? "disabled title='Only uploader can edit'" : ""}>Save</button>
-          </div>
-        </div>`;
-      });
+// usage live listener
+const usageQ = query(usageCol, orderBy("usedAt","desc"));
+onSnapshot(usageQ, snapshot=>{
+  if(usageTbody) usageTbody.innerHTML = "";
+  snapshot.forEach(docSnap=>{
+    const d = docSnap.data(); const id = docSnap.id;
+    const date = fmtDate(d.usedAt);
+    if(usageTbody){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td>
+        <td>${escapeHtml(d.unit)}</td><td>${d.qty}</td><td>${date}</td><td>${escapeHtml(d.remarks || "")}</td>
+        <td><button class="table-btn small-edit" data-id="${id}" data-action="edit">Edit</button></td>`;
+      usageTbody.appendChild(tr);
     }
-    html += `<div class="mt"><button class="btn" id="closeUsageBtn">Home</button></div>`;
-    openModal(html);
-    document.querySelectorAll("[data-save]").forEach(b => b.onclick = async (e) => {
-      const id = e.target.dataset.save;
-      const valEl = document.getElementById(`useInput_${id}`);
-      const val = parseInt(valEl.value || "0");
-      if (!Number.isFinite(val) || val < 0) { showToast("Enter a valid used quantity.", "error"); return; }
-      try {
-        const rRef = doc(db, "requests", id);
-        const rSnap = await getDoc(rRef);
-        if (!rSnap.exists()) return;
-        const r = rSnap.data();
-        // only uploader can save
-        if (!window.currentUser || window.currentUser.uid !== r.userId) { showToast("Only uploader can save usage.", "error"); return; }
-        const newUsed = (r.usedQty || 0) + val;
-        await updateDoc(rRef, { usedQty: Math.min(newUsed, r.qty) });
-        document.getElementById(`used_${id}`).textContent = Math.min(newUsed, r.qty);
-        showToast("Usage saved successfully!", "success");
-        refreshSummary();
-      } catch (err) { console.error(err); showToast("Error saving usage.", "error"); }
+  });
+
+  if(usageTbody){
+    usageTbody.querySelectorAll("button[data-action='edit']").forEach(btn=>{
+      btn.onclick = async () => {
+        const id = btn.dataset.id;
+        try{
+          const snap = await getDoc(doc(db,"usage",id));
+          if(!snap.exists()) return showToast("Record missing");
+          const data = snap.data();
+          editingUsageId = id;
+          if(editUsageTitle) editUsageTitle.textContent = "Edit Usage Remarks";
+          if(usageRequestSelect) usageRequestSelect.value = data.fromRequestId || "";
+          if(editUsageParticular) editUsageParticular.value = data.particular || "";
+          if(editUsageUnit) editUsageUnit.value = data.unit || "";
+          if(editUsageQty) editUsageQty.value = data.qty || 1;
+          if(editUsageRemarks) editUsageRemarks.value = data.remarks || "";
+          openModal(editUsageModal);
+        } catch(e){ console.error(e); showToast("⚠️ Fetch failed"); }
+      };
     });
-    document.getElementById("closeUsageBtn").onclick = closeModal;
-  } catch (err) { console.error(err); showToast("Error fetching usage list.", "error"); }
-};
+  }
+});
 
-// ================== Utilities ==================
-function escapeHtml(s){ return (s||"").toString().replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); }
+// decrement usage remaining only (and mark usageFulfilled if <=0)
+async function decrementUsageRemaining(requestId, delta){
+  try{
+    const reqRef = doc(db, "requests", requestId);
+    const snap = await getDoc(reqRef);
+    if(!snap.exists()) return;
+    const data = snap.data();
+    const cur = Number(data.remainingForUsage ?? data.qty ?? 0);
+    const newRem = Math.max(cur - Number(delta || 0), 0);
+    if(newRem <= 0){
+      await updateDoc(reqRef, { remainingForUsage: 0, usageFulfilled: true, updatedAt: serverTimestamp() });
+      showToast("✅ Request fulfilled for Usage (removed from Usage select)");
+    } else {
+      await updateDoc(reqRef, { remainingForUsage: newRem, updatedAt: serverTimestamp() });
+      showToast(`✅ Usage remaining updated: ${newRem}`);
+    }
+  } catch(err){ console.error("decrementUsageRemaining error:", err); }
+}
 
-refreshSummary();
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+// ---------- Remaining: compute and show ----------
+safeAddListener(viewRemainingBtn, "click", ()=> { computeAndRenderRemaining(); openModal(remainingModal); });
+safeAddListener(closeRemainingBtn, "click", ()=> closeModal(remainingModal));
+safeAddListener(closeRemainingBtnTop, "click", ()=> closeModal(remainingModal));
+safeAddListener(searchRemaining, "input", ()=> filterTableRows(remainingTbody, searchRemaining.value));
+safeAddListener(printRemainingBtn, "click", ()=> printTable("Remaining Inventory", document.getElementById("remainingTable")));
 
-/* NOTES:
- - Ensure Email/Password sign-in is enabled in Firebase Console (Authentication → Sign-in method).
- - Create unsigned Cloudinary preset "Crrd2025" (or rename in script).
- - Add Firestore security rules to enforce roles (I can supply rules on request).
-*/
+async function computeAndRenderRemaining(){
+  const reqSnap = await getDocs(requestsCol);
+  const delSnap = await getDocs(deliveredCol);
+  const usSnap = await getDocs(usageCol);
+  const totals = {}; // key -> {particular, requested, delivered, used}
+
+  reqSnap.forEach(s => {
+    const d = s.data();
+    const k = normKey(d.particular);
+    totals[k] = totals[k] || { particular: d.particular, requested:0, delivered:0, used:0 };
+    totals[k].requested += Number(d.qty || 0);
+  });
+  delSnap.forEach(s => {
+    const d = s.data();
+    const k = normKey(d.particular);
+    totals[k] = totals[k] || { particular: d.particular, requested:0, delivered:0, used:0 };
+    totals[k].delivered += Number(d.qty || 0);
+  });
+  usSnap.forEach(s => {
+    const d = s.data();
+    const k = normKey(d.particular);
+    totals[k] = totals[k] || { particular: d.particular, requested:0, delivered:0, used:0 };
+    totals[k].used += Number(d.qty || 0);
+  });
+
+  if(remainingTbody) remainingTbody.innerHTML = "";
+  const keys = Object.keys(totals).sort();
+  if(keys.length === 0){
+    if(remainingTbody) remainingTbody.innerHTML = `<tr><td colspan="5">No data</td></tr>`;
+    return;
+  }
+  keys.forEach(k=>{
+    const it = totals[k];
+    const remaining = (it.delivered || 0) - (it.used || 0);
+    if(remainingTbody){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(it.particular)}</td>
+        <td>${it.requested || 0}</td><td>${it.delivered || 0}</td><td>${it.used || 0}</td><td>${remaining}</td>`;
+      remainingTbody.appendChild(tr);
+    }
+  });
+}
+
+// ---------- History (monthly totals) ----------
+safeAddListener(viewHistoryBtn, "click", async ()=> { await renderHistory(); openModal(historyModal); });
+safeAddListener(closeHistoryBtn, "click", ()=> closeModal(historyModal));
+safeAddListener(closeHistoryBtnTop, "click", ()=> closeModal(historyModal));
+safeAddListener(searchHistory, "input", ()=> filterTableRows(historyTbody, searchHistory.value));
+safeAddListener(printHistoryBtn, "click", ()=> printTable("History Usage", document.getElementById("historyTable")));
+
+async function renderHistory(){
+  const snaps = await getDocs(usageCol);
+  const totals = {};
+  snaps.forEach(s=>{
+    const d = s.data();
+    const dt = d.usedAt?.toDate ? d.usedAt.toDate() : (d.usedAt ? new Date(d.usedAt) : new Date());
+    const month = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`;
+    const key = `${d.particular}||${month}`;
+    totals[key] = (totals[key]||0) + Number(d.qty || 0);
+  });
+  if(historyTbody) historyTbody.innerHTML = "";
+  const keys = Object.keys(totals).sort();
+  if(keys.length === 0){
+    if(historyTbody) historyTbody.innerHTML = `<tr><td colspan="3">No history</td></tr>`;
+    return;
+  }
+  keys.forEach(k=>{
+    const [particular, month] = k.split("||");
+    const [y,m] = month.split("-");
+    const monthLabel = new Date(Number(y), Number(m)-1, 1).toLocaleString(undefined,{month:"long", year:"numeric"});
+    if(historyTbody){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(particular)}</td><td>${monthLabel}</td><td>${totals[k]}</td>`;
+      historyTbody.appendChild(tr);
+    }
+  });
+}
+
+// ---------- Helpers to populate selects ----------
+function fillDeliveredSelect(requests){
+  if(!deliveredRequestSelect) return;
+  deliveredRequestSelect.innerHTML = `<option value="">-- Select a submitted request --</option>`;
+  // alphabetize by particular then personnel
+  requests.sort((a,b)=> {
+    const ka = (a.particular||"").toLowerCase();
+    const kb = (b.particular||"").toLowerCase();
+    if(ka < kb) return -1;
+    if(ka > kb) return 1;
+    return (a.personnel||"").toLowerCase().localeCompare((b.personnel||"").toLowerCase());
+  });
+  requests.forEach(r=>{
+    const label = `${r.personnel} — ${r.particular} (remain D:${r.remainingForDelivered})`;
+    const opt = document.createElement("option"); opt.value = r.id; opt.textContent = label;
+    deliveredRequestSelect.appendChild(opt);
+  });
+
+  deliveredRequestSelect.onchange = () => {
+    const rid = deliveredRequestSelect.value;
+    const sel = latestRequestsArray.find(x=> x.id === rid);
+    if(personnelEl) personnelEl.value = "";
+    if(sel){
+      if(editDeliveredParticular) editDeliveredParticular.value = sel.particular;
+      if(editDeliveredUnit) editDeliveredUnit.value = sel.unit;
+      if(editDeliveredQty) editDeliveredQty.value = sel.remainingForDelivered || sel.qty;
+    } else {
+      if(editDeliveredParticular) editDeliveredParticular.value = "";
+      if(editDeliveredUnit) editDeliveredUnit.value = "";
+      if(editDeliveredQty) editDeliveredQty.value = 1;
+    }
+  };
+
+  if(deliveredRequestSearch){
+    deliveredRequestSearch.oninput = () => {
+      const q = deliveredRequestSearch.value.toLowerCase().trim();
+      Array.from(deliveredRequestSelect.options).forEach(opt=>{
+        if(!opt.value){ opt.hidden = false; return; } // keep placeholder visible
+        opt.hidden = !(opt.text.toLowerCase().includes(q));
+      });
+    };
+  }
+}
+
+function fillUsageSelect(requests){
+  if(!usageRequestSelect) return;
+  usageRequestSelect.innerHTML = `<option value="">-- Select a submitted request --</option>`;
+  requests.sort((a,b)=> {
+    const ka = (a.particular||"").toLowerCase();
+    const kb = (b.particular||"").toLowerCase();
+    if(ka < kb) return -1;
+    if(ka > kb) return 1;
+    return (a.personnel||"").toLowerCase().localeCompare((b.personnel||"").toLowerCase());
+  });
+  requests.forEach(r=>{
+    const label = `${r.personnel} — ${r.particular} (remain U:${r.remainingForUsage})`;
+    const opt = document.createElement("option"); opt.value = r.id; opt.textContent = label;
+    usageRequestSelect.appendChild(opt);
+  });
+
+  usageRequestSelect.onchange = () => {
+    const rid = usageRequestSelect.value;
+    const sel = latestRequestsArray.find(x=> x.id === rid);
+    if(personnelEl) personnelEl.value = "";
+    if(sel){
+      if(editUsageParticular) editUsageParticular.value = sel.particular;
+      if(editUsageUnit) editUsageUnit.value = sel.unit;
+      if(editUsageQty) editUsageQty.value = sel.remainingForUsage || sel.qty;
+    } else {
+      if(editUsageParticular) editUsageParticular.value = "";
+      if(editUsageUnit) editUsageUnit.value = "";
+      if(editUsageQty) editUsageQty.value = 1;
+    }
+  };
+
+  if(usageRequestSearch){
+    usageRequestSearch.oninput = () => {
+      const q = usageRequestSearch.value.toLowerCase().trim();
+      Array.from(usageRequestSelect.options).forEach(opt=>{
+        if(!opt.value){ opt.hidden = false; return; }
+        opt.hidden = !(opt.text.toLowerCase().includes(q));
+      });
+    };
+  }
+}
+
+// Boot - initial fill of selects (one-shot)
+(async function boot(){
+  try{
+    const reqSnap = await getDocs(requestsCol);
+    const arrD = [];
+    const arrU = [];
+    reqSnap.forEach(s=>{
+      const d = s.data();
+      const remD = remainingForDelivered(d);
+      const remU = remainingForUsage(d);
+      if(!d.deliveredFulfilled && remD > 0){
+        arrD.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
+      }
+      if(!d.usageFulfilled && remU > 0){
+        arrU.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
+      }
+    });
+    fillDeliveredSelect(arrD);
+    fillUsageSelect(arrU);
+  } catch(e){ console.error("boot error", e); }
+})();
+
+// convenience loaders
+async function loadDeliveredRecords() {
+  if(!deliveredTbody) return;
+  deliveredTbody.innerHTML = "";
+  const snap = await getDocs(deliveredCol);
+  snap.forEach(docSnap=>{
+    const d = docSnap.data();
+    const date = fmtDate(d.deliveredAt);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td>
+      <td>${escapeHtml(d.unit)}</td><td>${d.qty}</td><td>${escapeHtml(d.status||"pending")}</td><td>${date}</td><td></td>`;
+    deliveredTbody.appendChild(tr);
+  });
+}
+
+async function loadUsageRecords() {
+  if(!usageTbody) return;
+  usageTbody.innerHTML = "";
+  const snap = await getDocs(usageCol);
+  snap.forEach(docSnap=>{
+    const d = docSnap.data();
+    const date = fmtDate(d.usedAt);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td style="text-align:left;padding-left:10px">${escapeHtml(d.particular)}</td>
+      <td>${escapeHtml(d.unit)}</td><td>${d.qty}</td><td>${date}</td><td>${escapeHtml(d.remarks||"")}</td><td></td>`;
+    usageTbody.appendChild(tr);
+  });
+}
+async function loadRemainingRecords() { await computeAndRenderRemaining(); }
+async function loadMaterialHistory() { await renderHistory(); }
+
+// initial load
+window.addEventListener("load", () => {
+  loadDeliveredRecords();
+  loadUsageRecords();
+  loadRemainingRecords();
+  loadMaterialHistory();
+});
+
+// ---------- Table filter helper ----------
+function filterTableRows(tbodyEl, queryText){
+  if(!tbodyEl) return;
+  const q = (queryText || "").toString().toLowerCase().trim();
+  Array.from(tbodyEl.querySelectorAll("tr")).forEach(tr=>{
+    const txt = tr.textContent.toLowerCase();
+    tr.style.display = txt.includes(q) ? "" : "none";
+  });
+}
+
+// ---------- Print helper (prints table with title & timestamp) ----------
+function printTable(title, tableEl){
+  if(!tableEl) { showToast("⚠️ Table not found"); return; }
+  const html = `
+    <html>
+      <head>
+        <title>${escapeHtml(title)}</title>
+        <style>
+          body{ font-family: Arial, Helvetica, sans-serif; padding:20px; color:#000 }
+          h1{ font-size:18px; margin-bottom:8px }
+          table{ width:100%; border-collapse:collapse; margin-top:10px }
+          th,td{ border:1px solid #ddd; padding:8px; text-align:left; font-size:12px }
+          th{ background:#f4f4f4; font-weight:700 }
+        </style>
+      </head>
+      <body>
+        <h1>${escapeHtml(title)}</h1>
+        <div>Printed: ${new Date().toLocaleString()}</div>
+        ${tableEl.outerHTML}
+      </body>
+    </html>
+  `;
+  const w = window.open("", "_blank", "width=900,height=700");
+  if(!w) { showToast("⚠️ Popup blocked. Allow popups to print."); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(()=> w.print(), 350);
+}
+
+// ---------- Utility: search input hookup for delivered/usage/request tables ----------
+safeAddListener(searchDelivered, "input", ()=> filterTableRows(deliveredTbody, searchDelivered.value));
+safeAddListener(searchUsage, "input", ()=> filterTableRows(usageTbody, searchUsage.value));
+// searchRequests hooked above once
+
+// ---------- Boot note: ensure selects update when requests change ----------
+onSnapshot(requestsQ, snapshot=>{
+  // rebuild selectable arrays for delivered/usage selects
+  const arrD = [];
+  const arrU = [];
+  snapshot.forEach(s=>{
+    const d = s.data();
+    const remD = remainingForDelivered(d);
+    const remU = remainingForUsage(d);
+    if(!d.deliveredFulfilled && remD > 0){
+      arrD.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForDelivered: remD, createdAt: d.createdAt });
+    }
+    if(!d.usageFulfilled && remU > 0){
+      arrU.push({ id: s.id, personnel: d.personnel, particular: d.particular, unit: d.unit, remainingForUsage: remU, createdAt: d.createdAt });
+    }
+  });
+  fillDeliveredSelect(arrD);
+  fillUsageSelect(arrU);
+});
